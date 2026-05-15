@@ -75,7 +75,14 @@
     "impactInternal": "内部 / 自动化",
     "internalManualPoint": "归入「{task}」业务任务；业务侧短冒烟即可，详细正确性由自动化或代码评审覆盖。",
     "internalCaveat": "如果冒烟时没有白屏、主路径可继续，业务人员无需深入。",
-    "defaultManualPoint": "参与「{task}」业务任务的回归。按该任务「怎么测」走主路径即可，不需要逐条复现。"
+    "defaultManualPoint": "参与「{task}」业务任务的回归。按该任务「怎么测」走主路径即可，不需要逐条复现。",
+    "keyManualPoint": "归入「{task}」业务任务，按该任务「怎么测」完整走一遍主路径；这条改动影响用户可见行为。",
+    "supportManualPoint": "归入「{task}」业务任务；做短冒烟即可，不需要逐条复现，重点关注主路径仍可走通。",
+    "unassignedTaskLabel": "（未归类 — 请检查 config 的 fallback.userImpactKey / fallback.internal）"
   }
 }
 ```
+
+`keyManualPoint` 和 `supportManualPoint` 为可选字段：留空则两档都用 `defaultManualPoint`；填了就分档显示（推荐，业务侧能看出"重点"和"支撑"的差异）。
+
+`unassignedTaskLabel` 只在 `fallback` 没配好时出现，正常配置下用户看不到，但出现一次就意味着 config 有缺，回去补。

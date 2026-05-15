@@ -182,9 +182,73 @@ network requests at view time. The page works offline.
 The script prints a single JSON line on stdout summarising what it did:
 
 ```json
-{"output":"/path/kanban.html","commits":793,"expectedCommits":793,"head":"...","branch":"main","tasks":15,"keyImpact":483,"support":65,"internal":245}
+{"output":"/path/kanban.html","commits":793,"expectedCommits":793,"head":"...","postRunHead":"...","headDriftedDuringRun":false,"branch":"main","tasks":15,"keyImpact":483,"support":65,"internal":245,"unassignedCommits":0}
 ```
 
-`commits` is what the script parsed; `expectedCommits` is `git rev-list
---count HEAD`. They should match. If they don't, something in git's output
-format changed — open an issue.
+- `commits` is what the script parsed; `expectedCommits` is `git rev-list --count HEAD`. They should match. If they don't, something in git's output format changed — open an issue.
+- `postRunHead` is re-read after the file is written. If `headDriftedDuringRun` is `true`, the user committed during the run and the page is already one or more commits behind — re-run.
+- `unassignedCommits > 0` means at least one commit matched no business task AND `fallback.userImpactKey` / `fallback.internal` weren't set or pointed to non-existent ids. The renderer surfaces these as `(unassigned)`; fix the config and re-run.
+
+The script also writes warnings to stderr when either of the above happens. Pipe to `2>/dev/null` to suppress, but don't suppress them by default — they're cheap, and silence has cost the agent a stale-kanban handoff at least once already.
+
+## Pitfalls
+
+Things the script will not save you from, and patterns to avoid.
+
+### Substring matching is greedy
+
+`moduleRules.match` and `businessTasks[*].matchKeywords` use `String.prototype.includes` — no word boundaries, no case-sensitivity. So:
+
+- `"auth"` matches `oauth`, `authentication`, `unauthorized`, `authorized` — far beyond just "login auth code".
+- `"chat"` matches `chatbot`, `wechat`, `purchased`.
+- `"ppt"` matches no real word — fine. But `"image"` matches `images`, `imager`, `imagery`.
+
+Prefer **3+ character anchors** unique to the domain — `signin`, `imap`, `presenton`, `ocr-pipeline` — over short generic stems. When you must use a short token, lean on `notMatch` to exclude the false positives.
+
+### `userCriticalRegex` runs against file paths, not commit subjects
+
+`impactRules.userCriticalRegex` is tested against each commit's file paths, not the commit's subject text. So `mail` in the regex matches `server/src/api/mail.ts` and `__tests__/mail-route.test.ts` equally — even though only the first one is genuinely "user-facing".
+
+Symptoms when this is misconfigured: the **key-impact ratio** climbs above ~70% of total commits. That makes the `key` tier meaningless — testers can no longer use it to prioritise. Fix:
+
+- Anchor the regex on path prefixes you actually care about (`src/activities/`, `app/(dashboard)/`) rather than keywords that match deep file names.
+- Move the broad domain keywords into `matchKeywords` of the relevant business task, not the global regex.
+
+A healthy spread is roughly 30–60% key, 10–30% support, 20–50% internal. Wide ranges, but the >70% key case is almost always a config bug.
+
+### Task ties go to the task declared first
+
+`matchTask` picks the highest-scoring task. On equal scores, the task that appears earlier in `businessTasks` wins. So if commit `feat(mobile): mobile.preview.image` gets `score=2` from both T02 ("Workspace / preview") and T08 ("Mobile companion"), whichever you wrote first will absorb it.
+
+Order your tasks by priority — the more specific, business-prominent task should come first.
+
+### `fallback` is required if you want a clean page
+
+If a commit matches no task and `fallback.userImpactKey` / `fallback.internal` are missing or point to ids not in `businessTasks`, the row renders with the `(unassigned — configure fallback…)` label. That's deliberate — silent dump-to-T01 hides config bugs.
+
+Always include a "responsive / smoke" task and a "release smoke" task at the end of your task list and reference them from `fallback`.
+
+### `userCriticalRegex` is a normal RegExp string
+
+It's case-insensitive (the script appends `i`), but otherwise raw. So `auth|signin|payment` is fine; `^auth$` will match nothing because file paths don't equal that. If you want word boundaries, write `(?:^|/)auth(?:[/.-]|$)` — and verify with a quick smoke run.
+
+### `internalManualPoint` / `keyManualPoint` / `supportManualPoint`
+
+The label keys for the per-row "Manual test point" line are tier-specific:
+
+- `keyManualPoint` (optional) — used when the commit is impact=`key`.
+- `supportManualPoint` (optional) — used when the commit is impact=`support`.
+- `internalManualPoint` — used when the commit is impact=`internal`.
+- `defaultManualPoint` — used for `key` and `support` if their dedicated template is empty.
+
+If you want a single line for both `key` and `support`, leave the dedicated templates empty and only set `defaultManualPoint`. If you want differentiated copy (recommended for handoffs to non-technical testers — `key` should sound more urgent than `support`), provide all three.
+
+`{task}` is substituted with `<task-id> · <task-name>`. Keep the placeholder.
+
+### Filter bar CSS gotcha
+
+The filter bar uses `display: flex; flex-wrap: wrap`. Long `<option>` text inside a `<select>` can intrinsically push the select past its share — historically this caused horizontal overflow at 390px. The script's CSS includes `min-width: 0` on `.filter-bar input, .filter-bar select, .filter-bar button` to defend against this. Do not strip it. (If you switch the layout to CSS grid, also use `grid-template-columns: repeat(N, minmax(0, 1fr))` for the same reason.)
+
+### File size scales with commit count × files-per-commit
+
+Each commit row's expanded file list is in the DOM (collapsed by default). A 1500-commit repo with a few large feature commits can easily hit 8–10 MB of HTML. The script doesn't trim files past 200 per commit (it shows "+N more"). If your repo regularly produces giant commits, consider lowering that cap or skipping the file list for `internal`-tier commits.

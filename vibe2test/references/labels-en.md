@@ -74,10 +74,17 @@ edit if you want to override one or two strings while keeping the rest as is.
     "impactInternal": "Internal / automation",
     "internalManualPoint": "Rolls up into task {task}. A short smoke is enough; deeper correctness is covered by automation or code review.",
     "internalCaveat": "If the smoke shows no blank screen and the main path still works, no per-commit verification needed.",
-    "defaultManualPoint": "Part of regression task {task}. Follow that task's \"How to test\" — no need to reproduce per commit."
+    "defaultManualPoint": "Part of regression task {task}. Follow that task's \"How to test\" — no need to reproduce per commit.",
+    "keyManualPoint": "Rolls up into task {task}. Run that task's \"How to test\" end-to-end — this change touches user-visible behaviour.",
+    "supportManualPoint": "Rolls up into task {task}. Short smoke is enough; do not reproduce per commit. Watch the main path.",
+    "unassignedTaskLabel": "(unassigned — configure `fallback.userImpactKey` / `fallback.internal`)"
   }
 }
 ```
 
 `{task}` placeholders are substituted with the task id + name at render time.
 Keep the placeholder or the per-row guidance will read as a generic line.
+
+`keyManualPoint` and `supportManualPoint` are optional. Leave both empty to fall back to `defaultManualPoint` for both tiers. Fill them in (recommended) to give testers differentiated copy: `key` should sound more urgent than `support`.
+
+`unassignedTaskLabel` only appears when `fallback.userImpactKey` / `fallback.internal` weren't set or pointed at missing ids — fix the config and re-run.

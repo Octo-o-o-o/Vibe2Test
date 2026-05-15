@@ -123,6 +123,12 @@ const DEFAULT_LABELS = {
   internalManualPoint: 'Rolls up into task {task}. A short smoke is enough; deeper correctness is covered by automation or code review.',
   internalCaveat: 'If the smoke shows no blank screen and the main path still works, no per-commit verification needed.',
   defaultManualPoint: 'Part of regression task {task}. Follow that task\'s "How to test" — no need to reproduce per commit.',
+  // Optional per-impact-tier overrides for the manual-point line.
+  // If unset, the renderer falls back to defaultManualPoint for both key and support.
+  keyManualPoint: '',
+  supportManualPoint: '',
+  // Banner shown when a commit ends up unassigned (no task match + no fallback configured).
+  unassignedTaskLabel: '(unassigned — configure `fallback.userImpactKey` / `fallback.internal`)',
 };
 
 const DEFAULT_TYPE_RULES = [
@@ -303,15 +309,18 @@ for (const c of commits) {
 
 // Fallback assignment
 const taskById = Object.fromEntries(businessTasks.map(t => [t.id, t]));
+let unassignedFallbackUsed = 0;
 for (const c of commits) {
   if (!c._task) {
     if (c._impact === 'key' && fallback.userImpactKey && taskById[fallback.userImpactKey]) {
       c._task = taskById[fallback.userImpactKey];
     } else if (fallback.internal && taskById[fallback.internal]) {
       c._task = taskById[fallback.internal];
-    } else if (businessTasks.length) {
-      // last resort: assign to first task
-      c._task = businessTasks[0];
+    } else {
+      // No matching task and no fallback configured — leave unassigned rather than
+      // silently dumping into businessTasks[0]. The renderer surfaces this as a
+      // visible "(unassigned)" tag so the agent notices their config is incomplete.
+      unassignedFallbackUsed += 1;
     }
   }
 }
@@ -400,9 +409,14 @@ function renderTaskCard(t, count) {
 function renderCommitRow(c) {
   const dateOnly = c.dateIso.slice(0, 10);
   const time = c.dateIso.slice(11, 16);
-  const taskName = c._task ? `${c._task.id} · ${c._task.name}` : '(unassigned)';
+  const taskName = c._task ? `${c._task.id} · ${c._task.name}` : labels.unassignedTaskLabel;
   const internal = c._impact === 'internal';
-  const taskTemplate = internal ? labels.internalManualPoint : labels.defaultManualPoint;
+  // Pick the most specific template available for this tier.
+  const tierTemplate = c._impact === 'key' ? labels.keyManualPoint
+                     : c._impact === 'support' ? labels.supportManualPoint
+                     : labels.internalManualPoint;
+  const taskTemplate = (tierTemplate && tierTemplate.length) ? tierTemplate
+                     : (internal ? labels.internalManualPoint : labels.defaultManualPoint);
   const manualPoint = taskTemplate.replace('{task}', taskName);
   const caveat = internal ? labels.internalCaveat : (c._task && c._task.caveats) || '';
   return `
@@ -480,7 +494,11 @@ const html = `<!DOCTYPE html>
   .quickstart { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .quickstart .qs-col { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 10px; }
   .filter-bar { position: sticky; top: 0; z-index: 5; background: #f6f7f9; padding: 8px 0; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; border-bottom: 1px solid #e5e7eb; margin-top: 16px; }
-  .filter-bar input, .filter-bar select, .filter-bar button { font: inherit; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; max-width: 100%; }
+  /* min-width:0 defends against the well-known intrinsic-min-content overflow when
+   * a select's longest <option> text would otherwise force the flex item wider than
+   * its share. Without this, a very long task name or module name can push the
+   * filter bar past the viewport on narrow screens. */
+  .filter-bar input, .filter-bar select, .filter-bar button { font: inherit; padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; max-width: 100%; min-width: 0; }
   .filter-bar input[type=search] { flex: 1 1 200px; min-width: 140px; }
   .filter-bar button { background: #1f2937; color: #fff; border: none; cursor: pointer; }
   .filter-counter { font-size: 12px; color: #4b5563; margin-left: auto; }
@@ -679,14 +697,32 @@ $('f-reset').addEventListener('click', () => {
 
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
 fs.writeFileSync(OUT, html, 'utf8');
+
+// Re-read HEAD AFTER writing so an interactive session committing in parallel is
+// detected. If it moved, the caller can re-run; we don't silently ship stale.
+let postHead = HEAD;
+try { postHead = git('rev-parse HEAD').trim(); } catch { /* ignore */ }
+const headDriftedDuringRun = postHead !== HEAD;
+
 console.log(JSON.stringify({
   output: OUT,
   commits: commits.length,
   expectedCommits: COUNT_FROM_GIT,
   head: HEAD,
+  postRunHead: postHead,
+  headDriftedDuringRun,
   branch: BRANCH,
   tasks: businessTasks.length,
   keyImpact: keyImpactCount,
   support: supportCount,
   internal: internalCount,
+  unassignedCommits: unassignedFallbackUsed,
 }));
+
+if (headDriftedDuringRun) {
+  // stderr — non-fatal, but visible
+  process.stderr.write(`[vibe2test] WARNING: HEAD moved during run (was ${HEAD.slice(0, 12)}, now ${postHead.slice(0, 12)}). Re-run if you need an up-to-date snapshot.\n`);
+}
+if (unassignedFallbackUsed > 0) {
+  process.stderr.write(`[vibe2test] WARNING: ${unassignedFallbackUsed} commit(s) did not match any business task AND no fallback was configured. Set fallback.userImpactKey and fallback.internal to absorb stragglers.\n`);
+}

@@ -107,6 +107,19 @@ about the failure.
 Easy to assert against in tests and CI without parsing HTML. The line is
 small and stable; bumps would be a breaking change.
 
+## Why we re-read HEAD after writing
+
+A vibe-coded project's owner often types in another terminal while the agent
+runs. That means HEAD can move between the moment we read `git log` and the
+moment the agent reports "done". Without a post-write check, the kanban
+silently lags by one or more commits — and the page itself prints what *was*
+HEAD, hiding the drift.
+
+The script now re-reads `git rev-parse HEAD` after writing the file and emits
+`headDriftedDuringRun` in its JSON output. The agent uses that to decide
+whether to re-run. This costs a millisecond and prevents the most common
+silent failure mode we've actually seen in real handoffs.
+
 ## Things we deliberately don't do
 
 - **Run the project.** This skill never starts a dev server, never executes

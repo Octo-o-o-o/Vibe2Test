@@ -34,8 +34,10 @@ Run in parallel:
 
 Then:
 - Never `reset --hard`, never `stash` without consent, never overwrite untracked files. Local changes are sacred.
-- `git pull --ff-only origin <current branch>` to fast-forward. If it fails, report and stop — don't rebase or merge silently.
+- `git pull --ff-only origin <current branch>` to fast-forward. If it fails (e.g. detached HEAD, no upstream, diverged), report and stop — don't rebase or merge silently.
 - Remember the final HEAD and commit count. They are displayed on the page and used to verify the script's output.
+
+**HEAD-drift hazard.** If the user is actively coding in another window — a common case for vibe-coded projects — HEAD can move between the moment you read it and the moment the script renders. The script (step 5) now reports `headDriftedDuringRun: true` when this happens. If it does, re-run the generator and re-verify. Do not ship a kanban whose HEAD doesn't match `git rev-parse HEAD` at the moment you hand it off.
 
 ## Step 2 — Gather context (one batch)
 
@@ -148,12 +150,15 @@ node ${VIBE2TEST_SKILL_DIR}/scripts/gen_kanban.js --config /tmp/vibe2test-config
 
 The script prints a JSON line summarising what it wrote:
 ```
-{"output":"...","commits":793,"expectedCommits":793,"head":"...","tasks":15,"keyImpact":483,"support":65,"internal":245}
+{"output":"...","commits":793,"expectedCommits":793,"head":"...","postRunHead":"...","headDriftedDuringRun":false,"tasks":15,"keyImpact":483,"support":65,"internal":245,"unassignedCommits":0}
 ```
 
 Sanity checks before declaring success:
-- `commits === expectedCommits` (the script counts what it parsed; if it disagrees with `git rev-list --count HEAD`, something is wrong)
-- The output file exists and is reasonable size (typical 1–5 MB; warn the user if over 10 MB)
+- `commits === expectedCommits` — the script counts what it parsed; mismatch means git output format changed or the run was interrupted.
+- `headDriftedDuringRun === false` — if `true`, the user committed during the run; re-run before reporting.
+- `unassignedCommits === 0` — if non-zero, your `fallback.userImpactKey` / `fallback.internal` is unset or wrong, and the page shows raw `(unassigned)` tags. Fix the config and re-run.
+- The output file exists and is reasonable size (typical 1–5 MB; warn the user if over 10 MB).
+- `keyImpact / commits` ratio is **roughly** 30–60% on a typical sprint. If it's >70% your `userCriticalRegex` is too broad — almost every commit matches the regex against file paths, defeating the point of the tier. Tighten it (see `references/customization.md → Pitfalls`).
 
 ## Step 6 — Verify in a browser
 
@@ -184,11 +189,14 @@ If any check fails, fix and re-run — don't ship a broken page. Kill the local 
 
 ## Step 7 — Report
 
+Before reporting, re-check `git rev-parse HEAD` one last time. If it doesn't match the HEAD baked into the page, the user committed during your run — re-run the generator. The script's `postRunHead` field flags this automatically; do not skip the check.
+
 End-of-turn summary, kept short:
 - pull result + HEAD + commit count
 - output path
-- task count, key-impact count
+- task count, key-impact count, internal count (and warn explicitly if `key` is >70% of total — see step 5)
 - verification result (desktop ✓, mobile ✓, one filter exercised)
+- whether HEAD drifted during the run (re-ran if yes)
 - git status — whether `kanban.html` is now an untracked file (it should be; don't commit it for the user)
 
 ## Things to refuse / push back on
