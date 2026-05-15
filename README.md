@@ -35,6 +35,17 @@ cp -r vibe2test ~/.claude/skills/
 cp -r vibe2test <your-repo>/.claude/skills/
 ```
 
+Or build a single distributable `vibe2test.skill` archive:
+
+```sh
+zip -r vibe2test.skill vibe2test \
+  -x '*/__pycache__/*' '*.pyc' '*.DS_Store' '*/node_modules/*' 'vibe2test/evals/*'
+```
+
+The resulting `.skill` is just a zip — Claude Code reads it the same way as
+the bare directory. Hand it to a teammate, they unzip it into their skills
+folder.
+
 Then in Claude Code, ask for a regression kanban:
 
 > Generate a business regression kanban for this repo.

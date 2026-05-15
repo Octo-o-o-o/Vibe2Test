@@ -9,3 +9,5 @@ vibe2test-workspace/
 .vscode/
 # Generated kanbans of test runs
 kanban*.html
+# Packaged skill (built on demand, distributed via GitHub Releases)
+*.skill
