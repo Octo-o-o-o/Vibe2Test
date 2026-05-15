@@ -1,0 +1,60 @@
+{
+  "skill_name": "vibe2test",
+  "notes": "Each prompt simulates a real user inviting Claude to generate a regression kanban. The 'expected_output' is what the file kanban.html should look like at a high level. Concrete assertions live in the per-eval eval_metadata.json files created during a benchmark run; the ones here are the high-confidence checks that don't require human judgement.",
+  "evals": [
+    {
+      "id": 1,
+      "name": "explicit-kanban-request-en",
+      "prompt": "I just finished a sprint and need to hand this repo off to QA tomorrow. Can you generate a business regression test kanban — one HTML file the PM can open in a browser to see what changed and what to test? The staging URL is https://staging.example.com/ and we use a test account; the PM has the password.",
+      "expected_output": "kanban.html exists at repo root, contains every commit, has 8–15 business tasks, mentions the staging URL, includes Quick Start panel, no horizontal overflow at 390px.",
+      "files": [],
+      "assertions": [
+        { "id": "a1", "text": "kanban.html is written at the repo root", "kind": "file-exists" },
+        { "id": "a2", "text": "commits in the page equal `git rev-list --count HEAD`", "kind": "structural" },
+        { "id": "a3", "text": "Number of business task cards is between 8 and 15", "kind": "structural" },
+        { "id": "a4", "text": "The page mentions the user-provided staging URL", "kind": "content" },
+        { "id": "a5", "text": "Page has zero horizontal overflow at 390px viewport", "kind": "render" },
+        { "id": "a6", "text": "Impact filter offers exactly three options (key / support / internal)", "kind": "structural" }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "implicit-zh-handoff",
+      "prompt": "我们小团队这两周 vibe coding 了一通，明天就要交给业务的同事做回归测试。能不能给我一个静态页面，业务的人打开就知道改了什么、该怎么测？域名 https://www.example.cn/，登录用 NextAuth + 测试账号。",
+      "expected_output": "kanban.html in Chinese, with the project's modules detected; staging URL shown; 8–15 中文 business tasks; impact filter labels in Chinese.",
+      "files": [],
+      "assertions": [
+        { "id": "a1", "text": "kanban.html exists at repo root", "kind": "file-exists" },
+        { "id": "a2", "text": "<html lang=\"zh-CN\">", "kind": "content" },
+        { "id": "a3", "text": "Type chip labels in Chinese (新增/修复/重构/...) appear in the page", "kind": "content" },
+        { "id": "a4", "text": "Impact filter options include '重点：需要模拟用户测试'", "kind": "content" },
+        { "id": "a5", "text": "Quick start panel mentions NextAuth + 测试账号", "kind": "content" },
+        { "id": "a6", "text": "commit count in the page equals `git rev-list --count HEAD`", "kind": "structural" }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "tiny-fresh-repo",
+      "prompt": "I just created this repo, only a handful of commits so far, but I want to start the habit of running a regression kanban before every release. Set one up.",
+      "expected_output": "kanban.html for a small repo. Task design still produces a sensible 8–15-task spine even though most tasks will have 0 commits. The recent-changes panel falls back to 'no key changes' if nothing matches.",
+      "files": [],
+      "assertions": [
+        { "id": "a1", "text": "kanban.html exists", "kind": "file-exists" },
+        { "id": "a2", "text": "Number of business task cards is between 6 and 15", "kind": "structural" },
+        { "id": "a3", "text": "commit count in the page equals `git rev-list --count HEAD`", "kind": "structural" },
+        { "id": "a4", "text": "No element exceeds the viewport width at 390px", "kind": "render" }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "negative-not-a-kanban",
+      "prompt": "Please review the auth flow in this codebase and tell me if there are any security issues.",
+      "expected_output": "Skill should NOT trigger. This is a code review task; vibe2test only generates regression kanbans.",
+      "files": [],
+      "should_trigger": false,
+      "assertions": [
+        { "id": "a1", "text": "Skill is not invoked", "kind": "trigger" }
+      ]
+    }
+  ]
+}
