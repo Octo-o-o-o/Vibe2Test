@@ -1,0 +1,11 @@
+node_modules/
+.DS_Store
+*.log
+vibe2test-workspace/
+/tmp/
+.env
+.env.local
+.idea/
+.vscode/
+# Generated kanbans of test runs
+kanban*.html

@@ -1,0 +1,88 @@
+{
+  "repo": "/absolute/path/to/your/repo",
+  "output": "/absolute/path/to/your/repo/kanban.html",
+  "projectName": "MyApp",
+  "language": "en",
+  "staging": {
+    "web": "https://staging.myapp.com/",
+    "api": "https://staging.myapp.com/api",
+    "loginUrl": "https://staging.myapp.com/login",
+    "loginMethod": "Test account — ask the PM for credentials. Do not use production accounts."
+  },
+  "manualDocDir": "docs/manual-testing/",
+  "moduleRules": [
+    { "name": "Auth & session", "match": ["auth", "signin", "session", "login", "signup"], "notMatch": ["admin"] },
+    { "name": "Admin / internal", "match": ["admin/", "/admin", "app/api/admin"] },
+    { "name": "API routes", "match": ["app/api/", "pages/api/"] },
+    { "name": "Frontend pages", "match": ["app/(", "app/dashboard", "pages/", "src/pages"] },
+    { "name": "Components", "match": ["components/", "src/components"] },
+    { "name": "Backend services", "match": ["services/", "src/services", "server/"] },
+    { "name": "Workers / queue", "match": ["workers/", "queue", "jobs/"] },
+    { "name": "Database", "match": ["prisma/", "migrations/", "drizzle/", "schema.sql"] },
+    { "name": "Library / utilities", "match": ["lib/", "src/lib", "utils/"] },
+    { "name": "Tests", "match": ["__tests__/", "/tests/", ".test.", ".spec.", "e2e/"] },
+    { "name": "Docs", "match": ["docs/", "README", ".md"] },
+    { "name": "Scripts / deploy", "match": ["scripts/", "deploy", "Dockerfile", ".sh"] },
+    { "name": "Tooling", "match": ["package.json", "tsconfig", ".config.", "eslint", "prettier", "biome"] }
+  ],
+  "impactRules": {
+    "internalTypes": ["test", "docs", "chore"],
+    "userFacingPatterns": ["app/(dashboard)", "app/dashboard", "app/(marketing)", "pages/", "components/"],
+    "userCriticalRegex": "auth|signin|login|signup|register|payment|credit|notification|upload|export|report|template|chat|share|invite|onboarding|billing|search",
+    "supportPatterns": ["services/", "src/services", "lib/", "src/lib", "workers/", "prisma/", "server/"]
+  },
+  "fallback": {
+    "userImpactKey": "T14",
+    "internal": "T15"
+  },
+  "businessTasks": [
+    {
+      "id": "T01",
+      "name": "Login, session, profile",
+      "persona": "New user / returning user",
+      "eta": "10 min",
+      "materials": "One test account + one unregistered email",
+      "cost": "None",
+      "urls": ["https://staging.myapp.com/login"],
+      "goal": "Confirm login, logout, session expiry, signup flows are stable.",
+      "how": "Log in; log out; log in again; try wrong password; refresh; toggle dark mode.",
+      "pass": "All transitions work, no blank screens, clear copy on failed login.",
+      "caveats": "Do not use real production accounts. Do not paste tokens in chat.",
+      "refDoc": "docs/manual-testing/auth.md",
+      "matchModules": ["Auth & session"],
+      "matchKeywords": ["auth", "signin", "session", "login", "logout", "register", "signup"]
+    },
+    {
+      "id": "T14",
+      "name": "Responsive, dark mode, error recovery",
+      "persona": "Anyone",
+      "eta": "20 min",
+      "materials": "Desktop browser + phone",
+      "cost": "None",
+      "urls": ["https://staging.myapp.com/"],
+      "goal": "Confirm main pages survive 1440 / 1280 / 768 / 390 widths, dark mode, network drops.",
+      "how": "Resize the browser, toggle dark, throttle to Slow 3G in DevTools, drop and restore network.",
+      "pass": "No horizontal scrolling at 390px, dark text legible, restore-network recovers the page.",
+      "caveats": "If you see horizontal overflow, screenshot at the actual width.",
+      "refDoc": "docs/manual-testing/responsive.md",
+      "matchModules": ["Frontend pages", "Components"],
+      "matchKeywords": ["responsive", "dark", "mobile", "theme"]
+    },
+    {
+      "id": "T15",
+      "name": "Release smoke (5 min)",
+      "persona": "On-call",
+      "eta": "5 min",
+      "materials": "One known-good account",
+      "cost": "None",
+      "urls": ["https://staging.myapp.com/"],
+      "goal": "Shortest path to confirm there is no widespread breakage after a release.",
+      "how": "Open home → log in → main workspace → core list view → click one read-only action.",
+      "pass": "Every page returns 200, console has no red errors, navigation is clickable.",
+      "caveats": "If smoke fails, roll back — do not start debugging.",
+      "refDoc": "Release SOP",
+      "matchModules": [],
+      "matchKeywords": ["smoke", "release", "deploy"]
+    }
+  ]
+}
