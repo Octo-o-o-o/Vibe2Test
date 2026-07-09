@@ -182,14 +182,21 @@ network requests at view time. The page works offline.
 The script prints a single JSON line on stdout summarising what it did:
 
 ```json
-{"output":"/path/kanban.html","commits":793,"expectedCommits":793,"head":"...","postRunHead":"...","headDriftedDuringRun":false,"branch":"main","tasks":15,"keyImpact":483,"support":65,"internal":245,"unassignedCommits":0}
+{"output":"/path/kanban.html","outputExistedBefore":false,"outputGitState":"untracked","outputGitStatus":"??","outputGitRelativePath":"kanban.html","outputGitTracked":false,"commits":793,"expectedCommits":793,"head":"...","postRunHead":"...","headDriftedDuringRun":false,"branch":"main","tasks":15,"keyImpact":483,"keyImpactRatio":0.6091,"support":65,"internal":245,"unassignedCommits":0}
 ```
 
+- `outputGitState` describes the generated file after the run:
+  - `untracked` — typical new generated handoff in a repo that does not commit `kanban.html`.
+  - `tracked-modified` — the repo already tracks this output; report it clearly and stage/commit only on explicit user request.
+  - `tracked-clean` — the regenerated file is identical to the committed copy.
+  - `ignored`, `outside-repo`, or `not-a-git-repo` — valid for custom output paths, but mention it if it affects handoff.
+- `outputExistedBefore` helps distinguish a brand-new handoff from overwriting a previous generated file.
 - `commits` is what the script parsed; `expectedCommits` is `git rev-list --count HEAD`. They should match. If they don't, something in git's output format changed — open an issue.
 - `postRunHead` is re-read after the file is written. If `headDriftedDuringRun` is `true`, the user committed during the run and the page is already one or more commits behind — re-run.
+- `keyImpactRatio` is rounded to four decimals. Ratios above `0.70` usually mean the global `userCriticalRegex` or `userFacingPatterns` are too broad.
 - `unassignedCommits > 0` means at least one commit matched no business task AND `fallback.userImpactKey` / `fallback.internal` weren't set or pointed to non-existent ids. The renderer surfaces these as `(unassigned)`; fix the config and re-run.
 
-The script also writes warnings to stderr when either of the above happens. Pipe to `2>/dev/null` to suppress, but don't suppress them by default — they're cheap, and silence has cost the agent a stale-kanban handoff at least once already.
+The script also writes warnings or notes to stderr for HEAD drift, unassigned commits, tracked/overwritten output files, and suspiciously high key-impact ratios. Pipe to `2>/dev/null` to suppress, but don't suppress them by default — they're cheap, and silence has cost the agent a stale-kanban handoff at least once already.
 
 ## Pitfalls
 
@@ -204,6 +211,8 @@ Things the script will not save you from, and patterns to avoid.
 - `"ppt"` matches no real word — fine. But `"image"` matches `images`, `imager`, `imagery`.
 
 Prefer **3+ character anchors** unique to the domain — `signin`, `imap`, `presenton`, `ocr-pipeline` — over short generic stems. When you must use a short token, lean on `notMatch` to exclude the false positives.
+
+Empty or whitespace-only strings in `match` / `notMatch` / `matchKeywords` are ignored by the script (an empty needle would otherwise match everything). Duplicate or missing task `id`s produce a stderr warning — fix the config rather than suppressing it.
 
 ### `userCriticalRegex` runs against file paths, not commit subjects
 

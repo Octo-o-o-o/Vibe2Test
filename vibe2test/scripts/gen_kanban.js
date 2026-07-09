@@ -55,6 +55,27 @@ if (args.output) config.output = args.output;
 const REPO = path.resolve(config.repo || process.cwd());
 const OUT = path.resolve(config.output || path.join(REPO, 'kanban.html'));
 
+function shellQuote(s) {
+  return `'${String(s).replace(/'/g, `'\\''`)}'`;
+}
+
+function realpathForCompare(p) {
+  const resolved = path.resolve(p);
+  const missingParts = [];
+  let cursor = resolved;
+  while (!fs.existsSync(cursor)) {
+    missingParts.unshift(path.basename(cursor));
+    const parent = path.dirname(cursor);
+    if (parent === cursor) return resolved;
+    cursor = parent;
+  }
+  try {
+    return path.join(fs.realpathSync.native(cursor), ...missingParts);
+  } catch {
+    return resolved;
+  }
+}
+
 // ---------- Defaults ----------
 
 const DEFAULT_LABELS = {
@@ -205,10 +226,73 @@ const staging = config.staging || {};
 const manualDocDir = config.manualDocDir || '';
 const businessTasks = Array.isArray(config.businessTasks) ? config.businessTasks : [];
 
+// Config lint: missing or duplicate task ids silently merge stats and break
+// per-task filtering. Surface them loudly instead (same policy as unassigned commits).
+{
+  const seenTaskIds = new Set();
+  for (const t of businessTasks) {
+    const id = t && t.id;
+    if (!id) {
+      process.stderr.write(`[vibe2test] WARNING: a business task has no "id" (name: ${(t && t.name) || '?'}). It cannot be filtered or referenced by fallback.\n`);
+    } else if (seenTaskIds.has(id)) {
+      process.stderr.write(`[vibe2test] WARNING: duplicate business task id "${id}". Task stats and filters will collide — make ids unique.\n`);
+    }
+    if (id) seenTaskIds.add(id);
+  }
+}
+
 // ---------- Git ----------
 
 function git(argstr) {
   return execSync(`git ${argstr}`, { cwd: REPO, maxBuffer: 512 * 1024 * 1024, encoding: 'utf8' });
+}
+
+function gitQuiet(argstr) {
+  try {
+    return execSync(`git ${argstr}`, {
+      cwd: REPO,
+      maxBuffer: 512 * 1024 * 1024,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
+function inspectOutputFile(outPath) {
+  const resolved = realpathForCompare(outPath);
+  const existed = fs.existsSync(resolved);
+  const rootRaw = gitQuiet('rev-parse --show-toplevel');
+  if (!rootRaw) {
+    return { existed, gitState: 'not-a-git-repo', gitStatus: '', relativePath: null, tracked: false };
+  }
+
+  const root = realpathForCompare(rootRaw);
+  const rel = path.relative(root, resolved);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    return { existed, gitState: 'outside-repo', gitStatus: '', relativePath: null, tracked: false };
+  }
+
+  const quoted = shellQuote(rel || '.');
+  const tracked = gitQuiet(`ls-files --error-unmatch -- ${quoted}`) !== null;
+  const porcelain = gitQuiet(`status --porcelain=v1 --ignored --untracked-files=all -- ${quoted}`) || '';
+  const code = porcelain.slice(0, 2);
+  let gitState = 'unknown';
+  if (tracked && !porcelain) gitState = 'tracked-clean';
+  else if (tracked) gitState = 'tracked-modified';
+  else if (code === '??') gitState = 'untracked';
+  else if (code === '!!') gitState = 'ignored';
+  else if (!existed) gitState = 'absent';
+  else gitState = 'untracked';
+
+  return {
+    existed,
+    gitState,
+    gitStatus: code,
+    relativePath: rel,
+    tracked,
+  };
 }
 
 const HEAD = git('rev-parse HEAD').trim();
@@ -254,7 +338,9 @@ function classifyType(subject) {
 
 function pathHas(file, needles) {
   if (!Array.isArray(needles)) return false;
-  for (const n of needles) if (file.includes(n)) return true;
+  // Skip empty needles: ''.includes('') is always true, so one stray empty
+  // string in a match list would silently swallow every file.
+  for (const n of needles) if (n && file.includes(n)) return true;
   return false;
 }
 
@@ -293,7 +379,10 @@ function matchTask(c) {
       for (const m of t.matchModules) if (modules.includes(m)) score += 2;
     }
     if (Array.isArray(t.matchKeywords)) {
-      for (const kw of t.matchKeywords) if (blob.includes(String(kw).toLowerCase())) score += 1;
+      for (const kw of t.matchKeywords) {
+        const needle = String(kw).toLowerCase().trim();
+        if (needle && blob.includes(needle)) score += 1;
+      }
     }
     if (score > bestScore) { bestScore = score; best = t; }
   }
@@ -348,6 +437,7 @@ const types = Array.from(new Set(commits.map(c => c._type))).sort();
 const keyImpactCount = commits.filter(c => c._impact === 'key').length;
 const supportCount = commits.filter(c => c._impact === 'support').length;
 const internalCount = commits.filter(c => c._impact === 'internal').length;
+const keyImpactRatio = commits.length ? keyImpactCount / commits.length : 0;
 
 // Recent highlights: scan most-recent commits (chronological end), pick first 8 key/support that map to distinct tasks
 const recent = commits.slice(-50).reverse();
@@ -577,7 +667,7 @@ const html = `<!DOCTYPE html>
 
   <section class="panel">
     <h2>${esc(labels.quickStart)}</h2>
-    <div class="quickstart">
+    <div class="quickstart quick-start">
       <div class="qs-col">
         ${staging.loginUrl ? `<h4>${esc(labels.loginEntry)}</h4><p><a href="${esc(staging.loginUrl)}" target="_blank" rel="noopener">${esc(staging.loginUrl)}</a></p>` : ''}
         ${staging.loginMethod ? `<h4>${esc(labels.loginInfo)}</h4><p>${esc(staging.loginMethod)}</p>` : ''}
@@ -695,8 +785,10 @@ $('f-reset').addEventListener('click', () => {
 </body>
 </html>`;
 
+const outputBefore = inspectOutputFile(OUT);
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
 fs.writeFileSync(OUT, html, 'utf8');
+const outputAfter = inspectOutputFile(OUT);
 
 // Re-read HEAD AFTER writing so an interactive session committing in parallel is
 // detected. If it moved, the caller can re-run; we don't silently ship stale.
@@ -706,6 +798,11 @@ const headDriftedDuringRun = postHead !== HEAD;
 
 console.log(JSON.stringify({
   output: OUT,
+  outputExistedBefore: outputBefore.existed,
+  outputGitState: outputAfter.gitState,
+  outputGitStatus: outputAfter.gitStatus,
+  outputGitRelativePath: outputAfter.relativePath,
+  outputGitTracked: outputAfter.tracked,
   commits: commits.length,
   expectedCommits: COUNT_FROM_GIT,
   head: HEAD,
@@ -714,6 +811,7 @@ console.log(JSON.stringify({
   branch: BRANCH,
   tasks: businessTasks.length,
   keyImpact: keyImpactCount,
+  keyImpactRatio: Number(keyImpactRatio.toFixed(4)),
   support: supportCount,
   internal: internalCount,
   unassignedCommits: unassignedFallbackUsed,
@@ -725,4 +823,12 @@ if (headDriftedDuringRun) {
 }
 if (unassignedFallbackUsed > 0) {
   process.stderr.write(`[vibe2test] WARNING: ${unassignedFallbackUsed} commit(s) did not match any business task AND no fallback was configured. Set fallback.userImpactKey and fallback.internal to absorb stragglers.\n`);
+}
+if (outputBefore.tracked || outputAfter.tracked) {
+  process.stderr.write(`[vibe2test] NOTE: output file is tracked by git (${outputAfter.gitState}: ${outputAfter.relativePath}). Review and stage it intentionally if you want to keep the refreshed kanban.\n`);
+} else if (outputBefore.existed) {
+  process.stderr.write(`[vibe2test] NOTE: output file already existed before this run (${outputAfter.gitState}: ${OUT}). It was overwritten.\n`);
+}
+if (keyImpactRatio > 0.7) {
+  process.stderr.write(`[vibe2test] WARNING: key-impact ratio is ${(keyImpactRatio * 100).toFixed(1)}%. Tighten impactRules.userCriticalRegex or userFacingPatterns if too many commits are being marked key.\n`);
 }

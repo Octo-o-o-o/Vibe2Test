@@ -144,23 +144,42 @@ For Chinese projects, set `"language": "zh"` and supply `labels` from `reference
 
 ## Step 5 — Run the generator
 
+`${CLAUDE_SKILL_DIR}` below is this skill's own directory (Claude Code substitutes it automatically; in other hosts, use the absolute path of the folder containing this SKILL.md):
+
 ```
-node ${VIBE2TEST_SKILL_DIR}/scripts/gen_kanban.js --config /tmp/vibe2test-config.json
+node ${CLAUDE_SKILL_DIR}/scripts/gen_kanban.js --config /tmp/vibe2test-config.json
 ```
 
 The script prints a JSON line summarising what it wrote:
 ```
-{"output":"...","commits":793,"expectedCommits":793,"head":"...","postRunHead":"...","headDriftedDuringRun":false,"tasks":15,"keyImpact":483,"support":65,"internal":245,"unassignedCommits":0}
+{"output":"...","outputExistedBefore":false,"outputGitState":"untracked","outputGitTracked":false,"commits":793,"expectedCommits":793,"head":"...","postRunHead":"...","headDriftedDuringRun":false,"tasks":15,"keyImpact":483,"keyImpactRatio":0.6091,"support":65,"internal":245,"unassignedCommits":0}
 ```
 
 Sanity checks before declaring success:
 - `commits === expectedCommits` — the script counts what it parsed; mismatch means git output format changed or the run was interrupted.
 - `headDriftedDuringRun === false` — if `true`, the user committed during the run; re-run before reporting.
 - `unassignedCommits === 0` — if non-zero, your `fallback.userImpactKey` / `fallback.internal` is unset or wrong, and the page shows raw `(unassigned)` tags. Fix the config and re-run.
+- `outputGitState` is understood. Normal new handoffs are usually `untracked`; `tracked-modified` means the repo already tracks `kanban.html`, so report that explicitly instead of assuming it is a disposable generated file.
 - The output file exists and is reasonable size (typical 1–5 MB; warn the user if over 10 MB).
-- `keyImpact / commits` ratio is **roughly** 30–60% on a typical sprint. If it's >70% your `userCriticalRegex` is too broad — almost every commit matches the regex against file paths, defeating the point of the tier. Tighten it (see `references/customization.md → Pitfalls`).
+- `keyImpactRatio` is **roughly** 0.30–0.60 on a typical sprint. If it's >0.70 your `userCriticalRegex` is too broad — almost every commit matches the regex against file paths, defeating the point of the tier. Tighten it (see `references/customization.md → Pitfalls`).
 
 ## Step 6 — Verify in a browser
+
+First run the bundled verifier for deterministic checks:
+
+```
+node ${CLAUDE_SKILL_DIR}/scripts/verify_kanban.js --config /tmp/vibe2test-config.json --json
+```
+
+If Playwright is available to normal Node resolution, run the full browser
+pass:
+
+```
+node ${CLAUDE_SKILL_DIR}/scripts/verify_kanban.js --config /tmp/vibe2test-config.json --browser --json
+```
+
+If `--browser` reports that Playwright is unavailable, continue with whichever
+browser automation the environment provides and mirror the same checks below.
 
 `file://` is often blocked by browser MCPs. Start a tiny local server:
 
@@ -169,7 +188,9 @@ cd <repo>
 python3 -m http.server 8765 --bind 127.0.0.1 &
 ```
 
-Then with whichever browser automation is available (Playwright preferred):
+If `8765` is already in use, pick any free local port; don't leave a failed or
+background server around. Then with whichever browser automation is available
+(Playwright preferred):
 
 **Desktop 1280×900**
 - title matches `${projectName} · ${labels.pageTitle}`
@@ -178,7 +199,11 @@ Then with whichever browser automation is available (Playwright preferred):
 - `.task-card` count matches `businessTasks.length`
 - `.commit-row` count matches the git commit count
 - `document.documentElement.scrollWidth === clientWidth` (no horizontal overflow)
-- Exercise one filter (e.g., `#f-impact` → `key`) and confirm the counter changes
+- Quick Start panel is visible (`.quickstart` / `.quick-start`)
+- Exercise one filter (e.g., `#f-impact` → `key`) and confirm the counter changes.
+  The page listens for `input`, so browser snippets must dispatch an `input`
+  event, not only `change`. If all rows share that impact, choose another impact
+  or a task filter whose count is smaller than the total.
 
 **Mobile 390×844**
 - No element has `scrollWidth > clientWidth + 2`
@@ -197,7 +222,49 @@ End-of-turn summary, kept short:
 - task count, key-impact count, internal count (and warn explicitly if `key` is >70% of total — see step 5)
 - verification result (desktop ✓, mobile ✓, one filter exercised)
 - whether HEAD drifted during the run (re-ran if yes)
-- git status — whether `kanban.html` is now an untracked file (it should be; don't commit it for the user)
+- git status — include `outputGitState` / tracked vs untracked. Do not commit it for the user unless explicitly asked.
+
+## Follow-on live regression
+
+Sometimes the user asks you to run the generated checklist against staging or
+production. That is a **separate execution pass**, not part of generating the
+static page. Use `kanban.html` as the source of truth for the test plan, but
+keep the same safety posture as any live environment test:
+
+- Start with non-destructive smoke checks: health endpoint, root page headers,
+  protected APIs return 401/403 when logged out, static bundles do not contain
+  secrets, and sensitive-looking paths such as `/.env`, `/.git/config`,
+  `/__*`, `/Users/*`, or `/opt/*` do not expose real files.
+- If the controlled browser is already signed in to the target environment,
+  treat it as an existing test session for read-only checks only. Do not extract
+  cookies, tokens, OTP codes, or session headers.
+- With an existing session, run a read-only route sweep before deeper task
+  flows: direct-open public/user/admin routes that the session can access,
+  capture error boundaries, blank screens, infinite loading states, uncaught
+  console errors, redirects, and desktop/mobile overflow.
+- Compare related surfaces for obvious count/data mismatches, such as dashboard
+  totals vs list pages, empty-state copy vs detail pages with records, and search
+  result counts vs visible rows.
+- If a browser automation policy blocks the staging/production URL, treat that
+  as a real blocker for UI verification. Do not work around it with another
+  browser surface, raw CDP, or lower-level automation. Continue only with safer
+  HTTP/API checks that do not bypass the policy, and report the UI tasks as
+  blocked.
+- Do not create accounts, submit forms, upload private files, trigger paid
+  work, send emails, publish, delete, purchase, or otherwise cause external
+  side effects unless the user explicitly authorised that exact action and
+  supplied test credentials/materials.
+- Authenticated flows that need OTP, SSO, a test session, or billing credits
+  are blocked until the user provides those. Report them as blocked rather than
+  pretending the run is complete.
+- For shell smoke loops, avoid `path` as a variable name under zsh because it
+  shadows the command search path. Use names like `url_path` or `route_path`.
+- When the repo has a manual testing directory, write a timestamped Markdown
+  report there. Keep observed evidence separate from inferred local source-code
+  hints.
+- In the final report, separate **passed**, **failed**, **blocked**, and
+  **not run** tasks. Include exact URLs/endpoints checked, status codes, and
+  any safety-relevant findings.
 
 ## Things to refuse / push back on
 
@@ -210,5 +277,6 @@ End-of-turn summary, kept short:
 
 - `references/customization.md` — full config schema and common patterns
 - `references/design-notes.md` — why the page is structured this way
+- `references/live-regression.md` — how to use the generated page as a safe live-environment test plan
 - `references/labels-zh.md` — Chinese UI string template
 - `references/labels-en.md` — English UI string template (defaults; copy and edit if you want to override)

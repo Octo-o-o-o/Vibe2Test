@@ -124,6 +124,15 @@ silent failure mode we've actually seen in real handoffs.
 
 - **Run the project.** This skill never starts a dev server, never executes
   test code. It only reads git history and writes one file.
+- **Pretend live testing is part of generation.** The generated page is an
+  executable plan, so a user may ask the agent to run it against staging or
+  production next. That follow-on pass has different safety rules: credentials,
+  OTP, browser-policy blocks, paid provider calls, uploads, emails, and external
+  writes must be handled explicitly. See `live-regression.md`.
+- **Make every verifier depend on one browser stack.** The bundled
+  `verify_kanban.js` always provides static checks and only runs browser checks
+  when Playwright is available. Agents can still use browser MCPs or app
+  browsers for the visual pass without changing the generator contract.
 - **Modify git history.** No rebases, no resets. The repo state is read-only.
 - **Compare against a baseline.** "What's new since v1.2.0" is a fine
   feature; this skill's scope is the *current branch's* full history.

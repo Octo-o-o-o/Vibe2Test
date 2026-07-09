@@ -56,13 +56,21 @@ The skill auto-triggers on phrases like "regression kanban", "QA dashboard",
 
 ## Use as a plain script (no Claude)
 
-You can run the generator yourself with a hand-written config:
+You can run the generator yourself with a hand-written config. Copy the sample
+first and replace its placeholder `repo` / `output` paths with real absolute
+paths:
 
 ```sh
-node vibe2test/scripts/gen_kanban.js --config examples/sample-config.json
+cp examples/sample-config.json /tmp/vibe2test-config.json
+$EDITOR /tmp/vibe2test-config.json
+node vibe2test/scripts/gen_kanban.js --config /tmp/vibe2test-config.json
+node vibe2test/scripts/verify_kanban.js --config /tmp/vibe2test-config.json --json
 ```
 
-You'll get a `kanban.html` written to wherever `output` points. See
+You'll get a `kanban.html` written to wherever `output` points. The generator's
+JSON summary includes `outputGitState` so you can tell whether the file is a
+new untracked handoff, a tracked modified file, or an output outside the repo.
+See
 `examples/sample-config.json` for the schema and
 `vibe2test/references/customization.md` for the full reference.
 
@@ -115,12 +123,24 @@ to-do list.
 See [`vibe2test/references/design-notes.md`](vibe2test/references/design-notes.md)
 for more design rationale.
 
+## Running the generated checklist
+
+`kanban.html` is an executable plan, not an automated test runner. If someone
+asks an agent to run the checklist against staging or production, use the page
+as the test matrix and follow
+[`vibe2test/references/live-regression.md`](vibe2test/references/live-regression.md):
+start with non-destructive public smoke checks, require explicit test
+credentials/approval for authenticated or costly flows, and report blocked UI
+tasks honestly when browser policy, OTP, SSO, or permissions prevent execution.
+When the target repo has a manual-testing directory, write a timestamped
+Markdown report there so the live run is auditable after the chat ends.
+
 ## Requirements
 
 - Node.js 18+ (the script uses zero npm dependencies).
 - `git` on `$PATH`.
-- A Python or other static HTTP server for browser-based verification (the
-  skill instructions handle this).
+- Playwright is optional for browser-based verification; when available,
+  `verify_kanban.js --browser` starts its own temporary local server.
 
 ## Status
 
