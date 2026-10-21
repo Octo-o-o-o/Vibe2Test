@@ -563,6 +563,12 @@ const html = `<!DOCTYPE html>
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; background: #f6f7f9; color: #1f2328; font-size: 14px; line-height: 1.55; }
+  /* Chromium's default text-spacing-trim:normal lets a trailing full-width CJK
+   * bracket render half-width at the line edge: the line fits visually but
+   * scrollWidth reports the untrimmed advance, tripping the mobile
+   * "scrollWidth > clientWidth + 2" overflow check with a ~half-glyph
+   * pseudo-overflow. Force untrimmed spacing so such lines wrap instead. */
+  body { text-spacing-trim: space-all; }
   .wrap { max-width: 1200px; margin: 0 auto; padding: 16px; }
   h1 { font-size: 22px; margin: 0 0 8px; }
   h2 { font-size: 18px; margin: 24px 0 12px; padding-bottom: 6px; border-bottom: 1px solid #e5e7eb; }
